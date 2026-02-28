@@ -190,9 +190,13 @@
     </div>
 
     <script>
-        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD/pub?output=csv';
+        // Extract the sheet ID from the published URL
+        const SHEET_ID = '2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD';
 
-            function getProxies() {
+        // gviz/tq always returns ALL columns without needing republish
+        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/' + SHEET_ID + '/pub?output=csv&single=true&chrome=false';
+
+        function getProxies() {
             var bust = '&_=' + Date.now();
             var sheetBust = SHEET_URL + bust;
             return [
@@ -270,13 +274,17 @@
         var _rows = [];
 
         function parseAndDisplay(csv) {
-            var lines = csv.trim().split('\n');
-            if (lines.length < 2) { showError('No data found.'); return; }
+            // Split into logical lines respecting quoted multiline cells
+            var logicalLines = splitCSVLines(csv);
+            if (logicalLines.length < 2) { showError('No data found.'); return; }
 
-            _headers = parseLine(lines[0]).map(function(h) { return h.replace(/\r/g, '').trim(); });
+            _headers = parseLine(logicalLines[0]).map(function(h) { return h.replace(/\r/g, '').trim(); });
+            // Remove trailing empty headers
+            while (_headers.length > 0 && _headers[_headers.length - 1] === '') _headers.pop();
+
             _rows = [];
-            for (var i = 1; i < lines.length; i++) {
-                var line = lines[i].trim();
+            for (var i = 1; i < logicalLines.length; i++) {
+                var line = logicalLines[i].trim();
                 if (!line) continue;
                 var vals = parseLine(line);
                 var row = {};
@@ -285,15 +293,17 @@
             }
             if (_rows.length === 0) { showError('No data found.'); return; }
 
-            // Populate dropdown with header names from col3 onward
+            // Populate dropdown with ALL header names from col3 onward (no hardcoded limit)
             var sel = document.getElementById('colFilter');
             sel.innerHTML = '<option value="">-- Select Floor --</option>';
             for (var k = FILTER_START_IDX; k < _headers.length; k++) {
+                if (!_headers[k]) continue; // skip blank headers
                 var opt = document.createElement('option');
                 opt.value = _headers[k];
                 opt.textContent = _headers[k];
                 sel.appendChild(opt);
             }
+            console.log('Total columns found:', _headers.length, '| Headers:', _headers);
 
             document.getElementById('filterBar').style.display = 'flex';
             document.getElementById('content').style.display = 'block';
@@ -398,6 +408,25 @@
 
         function formatMonthLabel(val) {
             return val; // year is already included in the cell data
+        }
+
+        // Splits raw CSV text into logical lines, keeping quoted multiline cells intact
+        function splitCSVLines(csv) {
+            var lines = [], cur = '', inQ = false;
+            for (var i = 0; i < csv.length; i++) {
+                var c = csv[i];
+                if (c === '"') {
+                    if (inQ && csv[i + 1] === '"') { cur += '"'; i++; }
+                    else { inQ = !inQ; cur += c; }
+                } else if ((c === '\n') && !inQ) {
+                    lines.push(cur);
+                    cur = '';
+                } else {
+                    cur += c;
+                }
+            }
+            if (cur) lines.push(cur);
+            return lines;
         }
 
         function parseLine(line) {
