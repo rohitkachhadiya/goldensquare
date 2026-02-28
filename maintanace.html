@@ -126,12 +126,15 @@
         .entry-card.pending .col-value { color: #b71c1c; font-weight: 600; }
 
         .entry-col {
-            padding: 12px 16px;
-            font-size: clamp(12px, 2.5vw, 14px);
+            padding: 10px 12px;
+            font-size: clamp(12px, 3.5vw, 14px);
             color: #333;
             flex: 1;
             word-break: break-word;
             border-right: 1px solid #eee;
+            display: flex;
+            align-items: center;
+            min-width: 0;
         }
         .entry-col:last-child { border-right: none; }
 
@@ -144,10 +147,53 @@
             margin-bottom: 4px;
         }
         .entry-col .col-value {
-            font-size: clamp(13px, 2.5vw, 15px);
+            font-size: clamp(12px, 3.5vw, 15px);
             color: #222;
             font-weight: 500;
+            word-break: break-word;
+            overflow-wrap: anywhere;
         }
+
+        /* Summary panel */
+        .summary-panel {
+            display: none;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.12);
+        }
+        .summary-panel-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 16px;
+            font-size: clamp(13px, 3vw, 16px);
+            font-weight: 700;
+            letter-spacing: 0.4px;
+        }
+        .summary-panel-body {
+            background: #f9f9f9;
+            padding: 12px 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            justify-content: space-between;
+            border: 1px solid #ddd;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+        }
+        .summary-item {
+            font-size: clamp(12px, 3vw, 14px);
+            color: #555;
+        }
+        .summary-grand {
+            font-size: clamp(14px, 3.5vw, 17px);
+            font-weight: 800;
+            padding: 6px 14px;
+            border-radius: 6px;
+        }
+        .summary-grand.due   { background: #ffebee; color: #b71c1c; }
+        .summary-grand.surplus { background: #e8f5e9; color: #1b5e20; }
 
         /* Stats bar */
         .stats {
@@ -163,9 +209,12 @@
         #content { display: none; }
 
         @media (max-width: 500px) {
-            .entry-card { flex-direction: column; }
-            .entry-col { border-right: none; border-bottom: 1px solid #eee; padding: 8px 12px; }
-            .entry-col:last-child { border-bottom: none; }
+            .container { padding: 10px 8px; }
+            .entry-card { flex-direction: row; }
+            .entry-col { padding: 8px 8px; border-right: 1px solid #eee; border-bottom: none; }
+            .entry-col:last-child { border-right: none; }
+            .month-total { flex-wrap: wrap; gap: 4px; }
+            .filter-bar select { min-width: 0; width: 100%; }
         }
     </style>
 </head>
@@ -183,6 +232,10 @@
                 <option value="">-- Select Floor --</option>
             </select>
         </div>
+        <div class="summary-panel" id="summaryPanel">
+            <div class="summary-panel-header">📊 Overall Summary</div>
+            <div class="summary-panel-body" id="summaryBody"></div>
+        </div>
         <div id="content">
             <div id="groups"></div>
             <div class="stats" id="stats"></div>
@@ -190,23 +243,15 @@
     </div>
 
     <script>
-        // Extract the sheet ID from the published URL
-        const SHEET_ID = '2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD';
+        const SHEET_PUBID = '2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD';
+        var FETCH_TIMEOUT_MS = 15000;
 
-        // gviz/tq always returns ALL columns without needing republish
-        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/' + SHEET_ID + '/pub?output=csv&single=true&chrome=false';
-
-        function getProxies() {
-            var bust = '&_=' + Date.now();
-            var sheetBust = SHEET_URL + bust;
-            return [
-                sheetBust,
-                'https://api.allorigins.win/raw?url=' + encodeURIComponent(sheetBust),
-                'https://corsproxy.io/?' + encodeURIComponent(sheetBust)
-            ];
+        function buildUrl() {
+            var sheetUrl = 'https://docs.google.com/spreadsheets/d/e/'
+                + SHEET_PUBID
+                + '/pub?output=csv&gid=0&single=true&t=' + Date.now();
+            return 'https://corsproxy.io/?' + encodeURIComponent(sheetUrl);
         }
-
-        var FETCH_TIMEOUT_MS = 8000; // 8 seconds per request
 
         function showLoading(v) {
             document.getElementById('loading').style.display = v ? 'block' : 'none';
@@ -216,57 +261,39 @@
             el.innerHTML = msg + ' <button onclick="loadData()" style="margin-left:8px;padding:4px 12px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">Retry</button>';
             el.style.display = 'block';
             document.getElementById('content').style.display = 'none';
+            document.getElementById('summaryPanel').style.display = 'none';
             showLoading(false);
         }
 
-        // Fetch with a timeout — rejects after ms milliseconds
-        function fetchWithTimeout(url, ms) {
+        function loadData() {
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('summaryPanel').style.display = 'none';
+            showLoading(true);
+
             var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-            var timer;
-            var fetchOpts = { cache: 'no-store' };
+            var timer = setTimeout(function() {
+                if (controller) controller.abort();
+            }, FETCH_TIMEOUT_MS);
+
+            var fetchOpts = { cache: 'no-store', redirect: 'follow' };
             if (controller) fetchOpts.signal = controller.signal;
-            var p = fetch(url, fetchOpts)
+
+            fetch(buildUrl(), fetchOpts)
                 .then(function(res) {
                     clearTimeout(timer);
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     return res.text();
                 })
                 .then(function(text) {
-                    if (!text || text.trim() === '') throw new Error('Empty');
-                    if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) throw new Error('HTML error page');
-                    return text;
+                    if (!text || text.trim() === '') throw new Error('Empty response');
+                    var t = text.trim();
+                    if (t.startsWith('<!') || t.startsWith('<html')) throw new Error('Received HTML instead of CSV');
+                    parseAndDisplay(text);
+                })
+                .catch(function(err) {
+                    clearTimeout(timer);
+                    showError('Could not load data: ' + err.message + '. Please check your internet connection and try again.');
                 });
-            var timeout = new Promise(function(_, reject) {
-                timer = setTimeout(function() {
-                    if (controller) controller.abort();
-                    reject(new Error('Timeout'));
-                }, ms);
-            });
-            return Promise.race([p, timeout]);
-        }
-
-        function loadData() {
-            var errEl = document.getElementById('errorMessage');
-            errEl.style.display = 'none';
-            showLoading(true);
-
-            // Fresh proxies with new cache-bust timestamp on every call
-            var attempts = getProxies().map(function(url) {
-                return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
-            });
-
-            var settled = 0;
-            var done = false;
-            attempts.forEach(function(p) {
-                p.then(function(text) {
-                    if (!done) { done = true; parseAndDisplay(text); }
-                }).catch(function() {
-                    settled++;
-                    if (!done && settled === attempts.length) {
-                        showError('Could not load data. Please check your internet connection.');
-                    }
-                });
-            });
         }
 
         var FILTER_START_IDX = 2;  // col3 onward (0-based)
@@ -317,12 +344,15 @@
         }
 
         function renderGroups(selectedHeader) {
-            var groupsEl = document.getElementById('groups');
-            var statsEl  = document.getElementById('stats');
+            var groupsEl   = document.getElementById('groups');
+            var statsEl    = document.getElementById('stats');
+            var summaryEl  = document.getElementById('summaryPanel');
+            var summaryBody = document.getElementById('summaryBody');
 
             if (!selectedHeader) {
                 groupsEl.innerHTML = '<p style="color:#888;padding:20px;text-align:center;">Please select a floor from the dropdown.</p>';
                 statsEl.style.display = 'none';
+                summaryEl.style.display = 'none';
                 return;
             }
 
@@ -338,6 +368,7 @@
             if (filtered.length === 0) {
                 groupsEl.innerHTML = '<p style="color:#888;padding:20px;text-align:center;">No data found for this selection.</p>';
                 statsEl.style.display = 'none';
+                summaryEl.style.display = 'none';
                 return;
             }
 
@@ -353,11 +384,12 @@
                 monthMap[month].push(row);
             });
 
+            // Grand totals across all months
+            var grandRed = 0, grandGreen = 0;
+
             var html = '';
             monthOrder.forEach(function(month) {
                 var entries = monthMap[month];
-
-                // Format month header: if it looks like a short month name, append year
                 var headerLabel = formatMonthLabel(month);
 
                 html += '<div class="month-group">';
@@ -374,21 +406,21 @@
                     html += '</div>';
                 });
 
-                // Calculate totals: sum red (pending) minus sum green (received)
+                // Per-month totals
                 var totalRed = 0, totalGreen = 0;
                 entries.forEach(function(row) {
                     var col2Val = row[col2].toLowerCase();
                     var isReceived = col2Val === 'recevied' || col2Val === 'received' || col2Val.indexOf('receiv') !== -1;
                     var amt = parseFloat((row[selectedHeader] || '').replace(/[^0-9.\-]/g, '')) || 0;
-                    if (isReceived) totalGreen += amt;
-                    else totalRed += amt;
+                    if (isReceived) { totalGreen += amt; grandGreen += amt; }
+                    else            { totalRed   += amt; grandRed   += amt; }
                 });
                 var balance = totalRed - totalGreen;
                 var balanceColor = balance <= 0 ? '#1b5e20' : '#b71c1c';
                 var balanceBg   = balance <= 0 ? '#e8f5e9' : '#ffebee';
                 var balanceLabel = balance <= 0 ? 'Fully Paid / Surplus' : 'Balance Due';
 
-                html += '<div class="month-total" style="background:' + balanceBg + ';border-top:2px solid #ddd;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;">';
+                html += '<div class="month-total" style="background:' + balanceBg + ';border-top:2px solid #ddd;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:4px;">';
                 html += '<div style="font-size:clamp(11px,2vw,13px);color:#555;">'
                       + '🔴 Total: <strong>' + totalRed.toLocaleString() + '</strong>'
                       + ' &nbsp;|&nbsp; 🟢 Received: <strong>' + totalGreen.toLocaleString() + '</strong>'
@@ -397,11 +429,25 @@
                       + balanceLabel + ': ' + Math.abs(balance).toLocaleString()
                       + '</div>';
                 html += '</div>';
-
                 html += '</div></div>';
             });
 
             groupsEl.innerHTML = html;
+
+            // Build summary panel
+            var grandBalance = grandRed - grandGreen;
+            var isSurplus = grandBalance <= 0;
+            var summaryHtml = '';
+            summaryHtml += '<div class="summary-item">🔴 <span>Total Billed:</span> <strong>' + grandRed.toLocaleString() + '</strong></div>';
+            summaryHtml += '<div class="summary-item">🟢 <span>Total Received:</span> <strong>' + grandGreen.toLocaleString() + '</strong></div>';
+            summaryHtml += '<div class="summary-item">📅 <span>Months:</span> <strong>' + monthOrder.length + '</strong></div>';
+            summaryHtml += '<div class="summary-grand ' + (isSurplus ? 'surplus' : 'due') + '">'
+                         + (isSurplus ? '✅ Surplus' : '⚠️ Total Due') + ': '
+                         + Math.abs(grandBalance).toLocaleString()
+                         + '</div>';
+            summaryBody.innerHTML = summaryHtml;
+            summaryEl.style.display = 'block';
+
             statsEl.innerHTML = 'Showing <strong>' + filtered.length + '</strong> entr' + (filtered.length === 1 ? 'y' : 'ies') + ' across <strong>' + monthOrder.length + '</strong> month' + (monthOrder.length === 1 ? '' : 's');
             statsEl.style.display = 'block';
         }
