@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <title>Golden Square Maintance System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 12px;
+            -webkit-text-size-adjust: 100%;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            padding: 16px;
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 16px;
+            text-align: center;
+            font-size: clamp(16px, 4vw, 26px);
+            line-height: 1.3;
+            padding: 0 8px;
+        }
+        .error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 5px;
+            margin-bottom: 16px;
+            display: none;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .loading {
+            text-align: center;
+            color: #667eea;
+            display: none;
+            margin: 40px 0;
+            font-size: 16px;
+        }
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid #e0e0e0;
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin: 12px auto 0;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .table-wrapper {
+            overflow-x: auto;
+            display: none;
+            margin-top: 12px;
+            -webkit-overflow-scrolling: touch;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            min-width: 400px;
+            font-size: clamp(12px, 2.5vw, 15px);
+        }
+        th {
+            background: #667eea;
+            color: white;
+            padding: 10px 12px;
+            text-align: left;
+            font-weight: 600;
+            border: 1px solid #5568d3;
+            white-space: nowrap;
+            position: sticky;
+            top: 0;
+            z-index: 1;
+        }
+        td {
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            color: #333;
+            word-break: break-word;
+            max-width: 200px;
+        }
+        tr:nth-child(even) { background: #f9f9f9; }
+        tr:hover { background: #f0f0f0; }
+        .stats {
+            padding: 12px;
+            background: #ecf0f1;
+            color: #333;
+            font-size: clamp(12px, 2.5vw, 14px);
+            border-top: 1px solid #ddd;
+        }
+        @media (max-width: 600px) {
+            body { padding: 8px; }
+            .container { padding: 12px 10px; border-radius: 8px; }
+            td { max-width: 140px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Golden Square Maintance System</h1>
+        <div class="error" id="errorMessage"></div>
+        <div class="loading" id="loading">
+            Loading data...
+            <div class="spinner"></div>
+        </div>
+        <div class="table-wrapper" id="tableWrapper">
+            <table id="csvTable">
+                <thead id="tableHead"></thead>
+                <tbody id="tableBody"></tbody>
+            </table>
+            <div class="stats" id="stats"></div>
+        </div>
+    </div>
+
+    <script>
+        const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD/pub?output=csv';
+
+        const PROXIES = [
+            'https://api.allorigins.win/raw?url=' + encodeURIComponent(SHEET_URL),
+            'https://corsproxy.io/?' + encodeURIComponent(SHEET_URL),
+            'https://thingproxy.freeboard.io/fetch/' + SHEET_URL,
+            SHEET_URL
+        ];
+
+        function showLoading(v) {
+            document.getElementById('loading').style.display = v ? 'block' : 'none';
+        }
+        function showError(msg) {
+            var el = document.getElementById('errorMessage');
+            el.innerHTML = msg;
+            el.style.display = 'block';
+            document.getElementById('tableWrapper').style.display = 'none';
+            showLoading(false);
+        }
+
+        function tryFetch(index) {
+            if (index >= PROXIES.length) {
+                showError('Could not load data. Please check your internet connection and try again.');
+                return;
+            }
+            fetch(PROXIES[index])
+                .then(function(res) {
+                    if (!res.ok) throw new Error('HTTP ' + res.status);
+                    return res.text();
+                })
+                .then(function(text) {
+                    if (!text || text.trim() === '') throw new Error('Empty response');
+                    // If response looks like HTML error page, skip to next proxy
+                    if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) throw new Error('HTML response');
+                    parseAndDisplay(text);
+                })
+                .catch(function() {
+                    tryFetch(index + 1);
+                });
+        }
+
+        function parseAndDisplay(csv) {
+            var lines = csv.trim().split('\n');
+            if (lines.length < 2) { showError('No data found in the sheet.'); return; }
+
+            var headers = parseLine(lines[0]);
+            var rows = [];
+            for (var i = 1; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line) continue;
+                var vals = parseLine(line);
+                var row = {};
+                for (var j = 0; j < headers.length; j++) {
+                    row[headers[j]] = vals[j] || '';
+                }
+                rows.push(row);
+            }
+
+            if (rows.length === 0) { showError('No data found in the sheet.'); return; }
+
+            // Build header
+            var thead = '<tr>';
+            headers.forEach(function(h) { thead += '<th>' + esc(h) + '</th>'; });
+            thead += '</tr>';
+            document.getElementById('tableHead').innerHTML = thead;
+
+            // Build rows
+            var tbody = '';
+            rows.forEach(function(row) {
+                tbody += '<tr>';
+                headers.forEach(function(h) { tbody += '<td>' + esc(row[h]) + '</td>'; });
+                tbody += '</tr>';
+            });
+            document.getElementById('tableBody').innerHTML = tbody;
+            document.getElementById('stats').innerHTML =
+                'Total Rows: <strong>' + rows.length + '</strong> &nbsp;|&nbsp; Total Columns: <strong>' + headers.length + '</strong>';
+
+            showLoading(false);
+            document.getElementById('tableWrapper').style.display = 'block';
+        }
+
+        function parseLine(line) {
+            var result = [], cur = '', inQ = false;
+            for (var i = 0; i < line.length; i++) {
+                var c = line[i];
+                if (c === '"') {
+                    if (inQ && line[i+1] === '"') { cur += '"'; i++; }
+                    else { inQ = !inQ; }
+                } else if (c === ',' && !inQ) {
+                    result.push(cur.trim()); cur = '';
+                } else { cur += c; }
+            }
+            result.push(cur.trim());
+            return result;
+        }
+
+        function esc(text) {
+            var d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
+        // Start loading
+        showLoading(true);
+        tryFetch(0);
+    </script>
+</body>
+</html>
+
