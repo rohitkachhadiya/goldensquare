@@ -16,7 +16,7 @@
             -webkit-text-size-adjust: 100%;
         }
         .container {
-            max-width: 1200px;
+            max-width: 900px;
             margin: 0 auto;
             background: white;
             border-radius: 10px;
@@ -58,53 +58,114 @@
             margin: 12px auto 0;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        .table-wrapper {
-            overflow-x: auto;
-            display: none;
-            margin-top: 12px;
-            -webkit-overflow-scrolling: touch;
-            border-radius: 6px;
-            border: 1px solid #ddd;
+
+        /* Filter bar */
+        .filter-bar {
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
         }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background: white;
-            min-width: 400px;
-            font-size: clamp(12px, 2.5vw, 15px);
-        }
-        th {
-            background: #667eea;
-            color: white;
-            padding: 10px 12px;
-            text-align: left;
+        .filter-bar label {
             font-weight: 600;
-            border: 1px solid #5568d3;
+            color: #444;
+            font-size: clamp(13px, 2.5vw, 15px);
             white-space: nowrap;
-            position: sticky;
-            top: 0;
-            z-index: 1;
         }
-        td {
-            padding: 10px 12px;
+        .filter-bar select {
+            padding: 7px 12px;
+            font-size: clamp(13px, 2.5vw, 15px);
+            border: 2px solid #667eea;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            min-width: 180px;
+        }
+
+        /* Month group section */
+        .month-group {
+            margin-bottom: 24px;
+        }
+        .month-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 10px 16px;
+            border-radius: 8px 8px 0 0;
+            font-size: clamp(15px, 3vw, 18px);
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .month-body {
             border: 1px solid #ddd;
-            color: #333;
-            word-break: break-word;
-            max-width: 200px;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            overflow: hidden;
         }
-        tr:nth-child(even) { background: #f9f9f9; }
-        tr:hover { background: #f0f0f0; }
-        .stats {
-            padding: 12px;
-            background: #ecf0f1;
-            color: #333;
+
+        /* Each maintenance entry card */
+        .entry-card {
+            display: flex;
+            align-items: stretch;
+            border-bottom: 1px solid #eee;
+            transition: background 0.15s;
+        }
+        .entry-card:last-child { border-bottom: none; }
+
+        .entry-card.received {
+            background: #e8f5e9;
+        }
+        .entry-card.received:hover { background: #c8e6c9; }
+        .entry-card.received .col-value { color: #1b5e20; font-weight: 600; }
+
+        .entry-card.pending {
+            background: #ffebee;
+        }
+        .entry-card.pending:hover { background: #ffcdd2; }
+        .entry-card.pending .col-value { color: #b71c1c; font-weight: 600; }
+
+        .entry-col {
+            padding: 12px 16px;
             font-size: clamp(12px, 2.5vw, 14px);
-            border-top: 1px solid #ddd;
+            color: #333;
+            flex: 1;
+            word-break: break-word;
+            border-right: 1px solid #eee;
         }
-        @media (max-width: 600px) {
-            body { padding: 8px; }
-            .container { padding: 12px 10px; border-radius: 8px; }
-            td { max-width: 140px; }
+        .entry-col:last-child { border-right: none; }
+
+        .entry-col .col-label {
+            font-size: clamp(10px, 2vw, 11px);
+            font-weight: 700;
+            color: #888;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+        .entry-col .col-value {
+            font-size: clamp(13px, 2.5vw, 15px);
+            color: #222;
+            font-weight: 500;
+        }
+
+        /* Stats bar */
+        .stats {
+            margin-top: 8px;
+            padding: 10px 14px;
+            background: #ecf0f1;
+            color: #555;
+            font-size: clamp(12px, 2.5vw, 13px);
+            border-radius: 6px;
+            display: none;
+        }
+
+        #content { display: none; }
+
+        @media (max-width: 500px) {
+            .entry-card { flex-direction: column; }
+            .entry-col { border-right: none; border-bottom: 1px solid #eee; padding: 8px 12px; }
+            .entry-col:last-child { border-bottom: none; }
         }
     </style>
 </head>
@@ -116,11 +177,14 @@
             Loading data...
             <div class="spinner"></div>
         </div>
-        <div class="table-wrapper" id="tableWrapper">
-            <table id="csvTable">
-                <thead id="tableHead"></thead>
-                <tbody id="tableBody"></tbody>
-            </table>
+        <div class="filter-bar" id="filterBar" style="display:none;">
+            <label for="colFilter">View:</label>
+            <select id="colFilter" onchange="applyFilter()">
+                <option value="">-- Select Floor --</option>
+            </select>
+        </div>
+        <div id="content">
+            <div id="groups"></div>
             <div class="stats" id="stats"></div>
         </div>
     </div>
@@ -128,86 +192,216 @@
     <script>
         const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQU4JnYmNTbLxkdye3fPVvA0PxGgMPEU0H2WGnrFWQR4lWDYNbdPcCQ2gIHG_kP9l-eG-Z6P-NQedGD/pub?output=csv';
 
-        const PROXIES = [
-            'https://api.allorigins.win/raw?url=' + encodeURIComponent(SHEET_URL),
-            'https://corsproxy.io/?' + encodeURIComponent(SHEET_URL),
-            'https://thingproxy.freeboard.io/fetch/' + SHEET_URL,
-            SHEET_URL
-        ];
+            function getProxies() {
+            var bust = '&_=' + Date.now();
+            var sheetBust = SHEET_URL + bust;
+            return [
+                sheetBust,
+                'https://api.allorigins.win/raw?url=' + encodeURIComponent(sheetBust),
+                'https://corsproxy.io/?' + encodeURIComponent(sheetBust)
+            ];
+        }
+
+        var FETCH_TIMEOUT_MS = 8000; // 8 seconds per request
 
         function showLoading(v) {
             document.getElementById('loading').style.display = v ? 'block' : 'none';
         }
         function showError(msg) {
             var el = document.getElementById('errorMessage');
-            el.innerHTML = msg;
+            el.innerHTML = msg + ' <button onclick="loadData()" style="margin-left:8px;padding:4px 12px;background:#667eea;color:white;border:none;border-radius:4px;cursor:pointer;font-size:13px;">Retry</button>';
             el.style.display = 'block';
-            document.getElementById('tableWrapper').style.display = 'none';
+            document.getElementById('content').style.display = 'none';
             showLoading(false);
         }
 
-        function tryFetch(index) {
-            if (index >= PROXIES.length) {
-                showError('Could not load data. Please check your internet connection and try again.');
-                return;
-            }
-            fetch(PROXIES[index])
+        // Fetch with a timeout — rejects after ms milliseconds
+        function fetchWithTimeout(url, ms) {
+            var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+            var timer;
+            var fetchOpts = { cache: 'no-store' };
+            if (controller) fetchOpts.signal = controller.signal;
+            var p = fetch(url, fetchOpts)
                 .then(function(res) {
+                    clearTimeout(timer);
                     if (!res.ok) throw new Error('HTTP ' + res.status);
                     return res.text();
                 })
                 .then(function(text) {
-                    if (!text || text.trim() === '') throw new Error('Empty response');
-                    // If response looks like HTML error page, skip to next proxy
-                    if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) throw new Error('HTML response');
-                    parseAndDisplay(text);
-                })
-                .catch(function() {
-                    tryFetch(index + 1);
+                    if (!text || text.trim() === '') throw new Error('Empty');
+                    if (text.trim().startsWith('<!') || text.trim().startsWith('<html')) throw new Error('HTML error page');
+                    return text;
                 });
+            var timeout = new Promise(function(_, reject) {
+                timer = setTimeout(function() {
+                    if (controller) controller.abort();
+                    reject(new Error('Timeout'));
+                }, ms);
+            });
+            return Promise.race([p, timeout]);
         }
+
+        function loadData() {
+            var errEl = document.getElementById('errorMessage');
+            errEl.style.display = 'none';
+            showLoading(true);
+
+            // Fresh proxies with new cache-bust timestamp on every call
+            var attempts = getProxies().map(function(url) {
+                return fetchWithTimeout(url, FETCH_TIMEOUT_MS);
+            });
+
+            var settled = 0;
+            var done = false;
+            attempts.forEach(function(p) {
+                p.then(function(text) {
+                    if (!done) { done = true; parseAndDisplay(text); }
+                }).catch(function() {
+                    settled++;
+                    if (!done && settled === attempts.length) {
+                        showError('Could not load data. Please check your internet connection.');
+                    }
+                });
+            });
+        }
+
+        var FILTER_START_IDX = 2;  // col3 onward (0-based)
+        var _headers = [];
+        var _rows = [];
 
         function parseAndDisplay(csv) {
             var lines = csv.trim().split('\n');
-            if (lines.length < 2) { showError('No data found in the sheet.'); return; }
+            if (lines.length < 2) { showError('No data found.'); return; }
 
-            var headers = parseLine(lines[0]);
-            var rows = [];
+            _headers = parseLine(lines[0]).map(function(h) { return h.replace(/\r/g, '').trim(); });
+            _rows = [];
             for (var i = 1; i < lines.length; i++) {
                 var line = lines[i].trim();
                 if (!line) continue;
                 var vals = parseLine(line);
                 var row = {};
-                for (var j = 0; j < headers.length; j++) {
-                    row[headers[j]] = vals[j] || '';
-                }
-                rows.push(row);
+                for (var j = 0; j < _headers.length; j++) row[_headers[j]] = (vals[j] || '').replace(/\r/g, '').trim();
+                _rows.push(row);
+            }
+            if (_rows.length === 0) { showError('No data found.'); return; }
+
+            // Populate dropdown with header names from col3 onward
+            var sel = document.getElementById('colFilter');
+            sel.innerHTML = '<option value="">-- Select Floor --</option>';
+            for (var k = FILTER_START_IDX; k < _headers.length; k++) {
+                var opt = document.createElement('option');
+                opt.value = _headers[k];
+                opt.textContent = _headers[k];
+                sel.appendChild(opt);
             }
 
-            if (rows.length === 0) { showError('No data found in the sheet.'); return; }
-
-            // Build header
-            var thead = '<tr>';
-            headers.forEach(function(h) { thead += '<th>' + esc(h) + '</th>'; });
-            thead += '</tr>';
-            document.getElementById('tableHead').innerHTML = thead;
-
-            // Build rows
-            var tbody = '';
-            rows.forEach(function(row) {
-                tbody += '<tr>';
-                headers.forEach(function(h) { tbody += '<td>' + esc(row[h]) + '</td>'; });
-                tbody += '</tr>';
-            });
-            document.getElementById('tableBody').innerHTML = tbody;
-            document.getElementById('stats').innerHTML =
-                'Total Rows: <strong>' + rows.length + '</strong> &nbsp;|&nbsp; Total Columns: <strong>' + headers.length + '</strong>';
-
+            document.getElementById('filterBar').style.display = 'flex';
+            document.getElementById('content').style.display = 'block';
             showLoading(false);
-            document.getElementById('tableWrapper').style.display = 'block';
+            applyFilter();
+        }
+
+        function applyFilter() {
+            var selectedHeader = document.getElementById('colFilter').value;
+            renderGroups(selectedHeader || null);
+        }
+
+        function renderGroups(selectedHeader) {
+            var groupsEl = document.getElementById('groups');
+            var statsEl  = document.getElementById('stats');
+
+            if (!selectedHeader) {
+                groupsEl.innerHTML = '<p style="color:#888;padding:20px;text-align:center;">Please select a floor from the dropdown.</p>';
+                statsEl.style.display = 'none';
+                return;
+            }
+
+            // col1 = _headers[0] (month), col2 = _headers[1] (maintenance type)
+            var col1 = _headers[0];
+            var col2 = _headers[1];
+
+            // Filter rows where selected column has a value
+            var filtered = _rows.filter(function(row) {
+                return row[selectedHeader] !== '';
+            });
+
+            if (filtered.length === 0) {
+                groupsEl.innerHTML = '<p style="color:#888;padding:20px;text-align:center;">No data found for this selection.</p>';
+                statsEl.style.display = 'none';
+                return;
+            }
+
+            // Group by col1 (month), preserving order of first appearance
+            var monthOrder = [];
+            var monthMap = {};
+            filtered.forEach(function(row) {
+                var month = row[col1] || '(No Month)';
+                if (!monthMap[month]) {
+                    monthMap[month] = [];
+                    monthOrder.push(month);
+                }
+                monthMap[month].push(row);
+            });
+
+            var html = '';
+            monthOrder.forEach(function(month) {
+                var entries = monthMap[month];
+
+                // Format month header: if it looks like a short month name, append year
+                var headerLabel = formatMonthLabel(month);
+
+                html += '<div class="month-group">';
+                html += '<div class="month-header">' + esc(headerLabel) + ' &nbsp;<span style="font-weight:400;font-size:0.8em;opacity:0.85;">(' + entries.length + ' entr' + (entries.length === 1 ? 'y' : 'ies') + ')</span></div>';
+                html += '<div class="month-body">';
+
+                entries.forEach(function(row) {
+                    var col2Val = row[col2].toLowerCase();
+                    var isReceived = col2Val === 'recevied' || col2Val === 'received' || col2Val.indexOf('receiv') !== -1;
+                    var cardClass = isReceived ? 'received' : 'pending';
+                    html += '<div class="entry-card ' + cardClass + '">';
+                    html += '<div class="entry-col"><div class="col-value">' + esc(row[col2]) + '</div></div>';
+                    html += '<div class="entry-col"><div class="col-value">' + esc(row[selectedHeader]) + '</div></div>';
+                    html += '</div>';
+                });
+
+                // Calculate totals: sum red (pending) minus sum green (received)
+                var totalRed = 0, totalGreen = 0;
+                entries.forEach(function(row) {
+                    var col2Val = row[col2].toLowerCase();
+                    var isReceived = col2Val === 'recevied' || col2Val === 'received' || col2Val.indexOf('receiv') !== -1;
+                    var amt = parseFloat((row[selectedHeader] || '').replace(/[^0-9.\-]/g, '')) || 0;
+                    if (isReceived) totalGreen += amt;
+                    else totalRed += amt;
+                });
+                var balance = totalRed - totalGreen;
+                var balanceColor = balance <= 0 ? '#1b5e20' : '#b71c1c';
+                var balanceBg   = balance <= 0 ? '#e8f5e9' : '#ffebee';
+                var balanceLabel = balance <= 0 ? 'Fully Paid / Surplus' : 'Balance Due';
+
+                html += '<div class="month-total" style="background:' + balanceBg + ';border-top:2px solid #ddd;padding:10px 16px;display:flex;justify-content:space-between;align-items:center;">';
+                html += '<div style="font-size:clamp(11px,2vw,13px);color:#555;">'
+                      + '🔴 Total: <strong>' + totalRed.toLocaleString() + '</strong>'
+                      + ' &nbsp;|&nbsp; 🟢 Received: <strong>' + totalGreen.toLocaleString() + '</strong>'
+                      + '</div>';
+                html += '<div style="font-weight:700;font-size:clamp(13px,2.5vw,15px);color:' + balanceColor + ';">'
+                      + balanceLabel + ': ' + Math.abs(balance).toLocaleString()
+                      + '</div>';
+                html += '</div>';
+
+                html += '</div></div>';
+            });
+
+            groupsEl.innerHTML = html;
+            statsEl.innerHTML = 'Showing <strong>' + filtered.length + '</strong> entr' + (filtered.length === 1 ? 'y' : 'ies') + ' across <strong>' + monthOrder.length + '</strong> month' + (monthOrder.length === 1 ? '' : 's');
+            statsEl.style.display = 'block';
+        }
+
+        function formatMonthLabel(val) {
+            return val; // year is already included in the cell data
         }
 
         function parseLine(line) {
+            line = line.replace(/\r/g, '');  // strip carriage returns from Google Sheets CSV
             var result = [], cur = '', inQ = false;
             for (var i = 0; i < line.length; i++) {
                 var c = line[i];
@@ -228,9 +422,8 @@
             return d.innerHTML;
         }
 
-        // Start loading
         showLoading(true);
-        tryFetch(0);
+        loadData();
     </script>
 </body>
 </html>
